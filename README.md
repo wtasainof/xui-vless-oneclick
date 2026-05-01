@@ -1,3 +1,5 @@
+# 本脚本为一键部署 X-ui Vless 脚本
+
 # VPS购买：https://www.vultr.com/?ref=9842421
 
 # xui-vless-oneclick
