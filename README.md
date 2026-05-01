@@ -1,3 +1,5 @@
+# VPS购买：https://www.vultr.com/?ref=9842421
+
 # xui-vless-oneclick
 
 A simple one-click setup script for deploying an x-ui based VLESS + WebSocket + TLS node on a fresh Debian/Ubuntu VPS.
