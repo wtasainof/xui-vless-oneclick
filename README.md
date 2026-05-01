@@ -1,4 +1,4 @@
-# 本脚本为一键部署 X-ui Vless 脚本
+# 本脚本可以一键部署 X-ui Vless
 
 # VPS购买：https://www.vultr.com/?ref=9842421
 
