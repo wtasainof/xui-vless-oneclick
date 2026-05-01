@@ -62,8 +62,7 @@ ask_secret() {
   local prompt="$1"
   local value=""
   while [[ -z "${value}" ]]; do
-    read -r -s -p "${prompt}: " value
-    echo
+    read -r -p "${prompt}: " value
   done
   printf '%s' "${value}"
 }
@@ -90,7 +89,10 @@ valid_port() {
 valid_panel_password() {
   local password="$1"
   [[ ${#password} -ge 8 ]] || return 1
-  [[ ! "${password}" =~ [[:space:]\*\?\[] ]]
+  case "${password}" in
+    *[[:space:]]*|*\**|*\?*|*\[*) return 1 ;;
+    *) return 0 ;;
+  esac
 }
 
 normalize_ws_path() {
@@ -124,11 +126,12 @@ collect_inputs() {
   DOMAIN="$(ask_required "请输入你的域名，例如 example.com")"
   valid_domain "${DOMAIN}" || die "域名格式不正确：${DOMAIN}"
 
-  CF_TOKEN="$(ask_secret "请输入 Cloudflare API Token（输入时不会显示）")"
+  CF_TOKEN="$(ask_secret "请输入 Cloudflare API Token（会显示，确认没人能看到你的屏幕）")"
+  CF_TOKEN="${CF_TOKEN//[[:space:]]/}"
 
   PANEL_USER="${PANEL_USER_DEFAULT}"
   while true; do
-    PANEL_PASS="$(ask_secret "设置 x-ui 面板密码，至少 8 位，不要包含空格、*、?、[（输入时不会显示）")"
+    PANEL_PASS="$(ask_secret "设置 x-ui 面板密码，至少 8 位，不要包含空格、*、?、[（会显示）")"
     valid_panel_password "${PANEL_PASS}" && break
     warn "密码格式不合适。请至少 8 位，并避免空格、*、?、[。"
   done
@@ -171,15 +174,19 @@ cloudflare_api() {
   local path="$2"
   local data="${3:-}"
   if [[ -n "${data}" ]]; then
-    curl -fsSL -X "${method}" "https://api.cloudflare.com/client/v4${path}" \
+    curl --http1.1 -sSL -X "${method}" "https://api.cloudflare.com/client/v4${path}" \
       -H "Authorization: Bearer ${CF_TOKEN}" \
       -H "Content-Type: application/json" \
       --data "${data}"
   else
-    curl -fsSL -X "${method}" "https://api.cloudflare.com/client/v4${path}" \
+    curl --http1.1 -sSL -X "${method}" "https://api.cloudflare.com/client/v4${path}" \
       -H "Authorization: Bearer ${CF_TOKEN}" \
       -H "Content-Type: application/json"
   fi
+}
+
+cloudflare_success() {
+  jq -e '.success == true' >/dev/null
 }
 
 get_zone_name() {
@@ -202,7 +209,10 @@ get_zone_name() {
 upsert_dns_record() {
   info "检查 Cloudflare Zone..."
   ZONE_NAME="$(get_zone_name "${DOMAIN}")"
-  ZONE_ID="$(cloudflare_api GET "/zones?name=${ZONE_NAME}&status=active" | jq -r '.result[0].id')"
+  local zone_resp
+  zone_resp="$(cloudflare_api GET "/zones?name=${ZONE_NAME}&status=active")"
+  echo "${zone_resp}" | cloudflare_success || die "获取 Cloudflare Zone ID 失败：$(echo "${zone_resp}" | jq -r '.errors[0].message // "未知错误"')"
+  ZONE_ID="$(echo "${zone_resp}" | jq -r '.result[0].id')"
   [[ -n "${ZONE_ID}" && "${ZONE_ID}" != "null" ]] || die "获取 Cloudflare Zone ID 失败"
 
   if ! ask_yes_no "是否自动把域名 A 记录解析到当前 VPS IP？建议选 Y" "y"; then
@@ -218,9 +228,9 @@ upsert_dns_record() {
     '{type:$type,name:$name,content:$content,ttl:1,proxied:false}')"
 
   if [[ -n "${existing}" ]]; then
-    cloudflare_api PUT "/zones/${ZONE_ID}/dns_records/${existing}" "${payload}" >/dev/null
+    cloudflare_api PUT "/zones/${ZONE_ID}/dns_records/${existing}" "${payload}" | cloudflare_success || die "更新 Cloudflare DNS 记录失败"
   else
-    cloudflare_api POST "/zones/${ZONE_ID}/dns_records" "${payload}" >/dev/null
+    cloudflare_api POST "/zones/${ZONE_ID}/dns_records" "${payload}" | cloudflare_success || die "创建 Cloudflare DNS 记录失败"
   fi
   log "DNS A 记录已设置为 DNS Only。等节点可用后，再去 Cloudflare 打开橙色云朵。"
 }
